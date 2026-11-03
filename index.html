@@ -401,7 +401,7 @@
 <header>
   <p class="eyebrow">Карта дня</p>
   <h1>Таро Дня</h1>
-  <p class="sub">Сосредоточьтесь на вопросе и начните тасовать колоду</p>
+  <p class="sub">Одна карта в сутки — сосредоточьтесь на вопросе и начните тасовать</p>
 </header>
 
 <main>
@@ -431,7 +431,7 @@
   </div>
 </main>
 
-<footer>72 карты Таро · выпадение случайно, включая перевёрнутое положение</footer>
+<footer>22 старших аркана · выпадение случайно, включая перевёрнутое положение · одна карта в 24 часа</footer>
 
 <script>
 (function(){
@@ -512,7 +512,69 @@
     deck.appendChild(c);
   }
 
-  var state = 'idle'; // idle -> shuffling -> drawing -> revealed
+  var state = 'idle'; // idle -> shuffling -> drawing -> revealed -> locked
+  var STORAGE_KEY = 'tarotDayDraw';
+  var COOLDOWN = 24 * 60 * 60 * 1000;
+  var countdownTimer = null;
+
+  function readSaved(){
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      if (!data || typeof data.ts !== 'number' || typeof data.idx !== 'number') return null;
+      return data;
+    } catch(e){ return null; }
+  }
+
+  function saveDraw(idx, reversed){
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ts: Date.now(), idx: idx, reversed: reversed}));
+    } catch(e){}
+  }
+
+  function formatRemaining(ms){
+    var totalSec = Math.max(0, Math.ceil(ms / 1000));
+    var h = Math.floor(totalSec / 3600);
+    var m = Math.floor((totalSec % 3600) / 60);
+    var s = totalSec % 60;
+    function p(n){ return (n < 10 ? '0' : '') + n; }
+    return p(h) + ':' + p(m) + ':' + p(s);
+  }
+
+  function lockForDuration(){
+    state = 'locked';
+    btn.disabled = true;
+    if (countdownTimer) clearInterval(countdownTimer);
+
+    function tick(){
+      var saved = readSaved();
+      var rem = saved ? (saved.ts + COOLDOWN - Date.now()) : 0;
+      if (rem <= 0){
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+        btn.disabled = false;
+        btn.textContent = 'Тасовать колоду';
+        status.textContent = 'Новая карта доступна — нажмите «Тасовать»';
+        state = 'idle';
+        return;
+      }
+      btn.textContent = 'Через ' + formatRemaining(rem);
+      status.textContent = 'Карта дня уже выбрана — возвращайтесь позже';
+    }
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  function showSavedDraw(saved){
+    var result = { card: DECK[saved.idx], idx: saved.idx, reversed: saved.reversed };
+    render(result);
+    stage.classList.add('settled');
+    drawn.classList.add('show', 'flip');
+    revealPanel.classList.add('show');
+    status.textContent = 'Ваша карта на сегодня';
+    btn.textContent = 'Тасовать снова';
+  }
 
   function pickCard(){
     var idx = Math.floor(Math.random() * DECK.length);
@@ -574,16 +636,20 @@
     setTimeout(function(){
       status.textContent = 'Ваша карта на сегодня';
       revealPanel.classList.add('show');
-      btn.textContent = 'Тасовать снова';
-      btn.disabled = false;
       state = 'revealed';
+      saveDraw(result.idx, result.reversed);
+      lockForDuration();
     }, 1250);
   }
 
   btn.addEventListener('click', startShuffle);
 
   function start(savedData){
-    // no persisted state needed; each open starts fresh
+    var saved = readSaved();
+    if (saved && (saved.ts + COOLDOWN - Date.now()) > 0){
+      showSavedDraw(saved);
+      lockForDuration();
+    }
   }
   if (window.claude && window.claude.hot && window.claude.hot.ready) {
     window.claude.hot.ready(start);
